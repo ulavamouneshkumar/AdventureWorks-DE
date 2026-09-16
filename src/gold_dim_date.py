@@ -15,7 +15,7 @@ from pyspark.sql.functions import (
 )
 
 from delta import configure_spark_with_delta_pip
-
+from config import SILVER_TABLES, GOLD_TABLES
 
 # ============================================================
 # 1. CREATE SPARK SESSION
@@ -41,11 +41,11 @@ spark = configure_spark_with_delta_pip(builder).getOrCreate()
 # ============================================================
 # 2. READ SILVER CALENDAR
 # ============================================================
-
+silver_path = str(SILVER_TABLES["calendar"])
 calendar = (
     spark.read
     .format("delta")
-    .load("data/silver/calendar")
+    .load(silver_path)
 )
 
 
@@ -205,7 +205,7 @@ dim_date = (
 # 4. WRITE GOLD DELTA TABLE
 # ============================================================
 
-target_path = "data/gold/dim_date"
+target_path = str(GOLD_TABLES["dim_date"])
 
 (
     dim_date

@@ -1,6 +1,7 @@
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col
 from delta import configure_spark_with_delta_pip
+from config import SILVER_TABLES, GOLD_TABLES
 
 
 # ============================================================
@@ -28,10 +29,12 @@ spark = configure_spark_with_delta_pip(builder).getOrCreate()
 # 2. READ SILVER RETURNS
 # ============================================================
 
+returns_path = str(SILVER_TABLES["returns"])
+
 returns = (
     spark.read
     .format("delta")
-    .load("data/silver/returns")
+    .load(returns_path)
 )
 
 
@@ -39,22 +42,29 @@ returns = (
 # 3. READ GOLD DIMENSIONS
 # ============================================================
 
+dim_date_path = str(GOLD_TABLES["dim_date"])
+dim_product_path = str(GOLD_TABLES["dim_product"])
+dim_territory_path = str(GOLD_TABLES["dim_territory"])
+
+
 dim_date = (
     spark.read
     .format("delta")
-    .load("data/gold/dim_date")
+    .load(dim_date_path)
 )
+
 
 dim_product = (
     spark.read
     .format("delta")
-    .load("data/gold/dim_product")
+    .load(dim_product_path)
 )
+
 
 dim_territory = (
     spark.read
     .format("delta")
-    .load("data/gold/dim_territory")
+    .load(dim_territory_path)
 )
 
 
@@ -127,7 +137,8 @@ fact_returns = (
 # 8. WRITE GOLD FACT
 # ============================================================
 
-target_path = "data/gold/fact_returns"
+target_path = str(GOLD_TABLES["fact_returns"])
+
 
 (
     fact_returns
@@ -188,9 +199,9 @@ distinct_grain = (
 )
 
 print(f"Total rows              : {total_rows}")
-print(f"Distinct return grain  : {distinct_grain}")
+print(f"Distinct return grain   : {distinct_grain}")
 print(
-    f"Duplicate combinations : "
+    f"Duplicate combinations  : "
     f"{total_rows - distinct_grain}"
 )
 

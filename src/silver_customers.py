@@ -8,7 +8,7 @@ from pyspark.sql.functions import (
 )
 from pyspark.sql.types import DecimalType
 from delta import configure_spark_with_delta_pip
-
+from config import SOURCE_FILES, BRONZE_TABLES, SILVER_TABLES
 
 # ============================================================
 # 1. CREATE SPARK SESSION
@@ -35,7 +35,7 @@ spark = configure_spark_with_delta_pip(builder).getOrCreate()
 # 2. READ BRONZE CUSTOMERS
 # ============================================================
 
-bronze_path = "data/bronze/customers"
+bronze_path = str(BRONZE_TABLES["customers"])
 
 customers = (
     spark.read
@@ -101,7 +101,7 @@ silver_customers = (
 # 4. WRITE SILVER DELTA TABLE
 # ============================================================
 
-target_path = "data/silver/customers"
+target_path = str(SILVER_TABLES["customers"])
 
 (
     silver_customers

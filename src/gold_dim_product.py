@@ -1,6 +1,7 @@
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, trim
 from delta import configure_spark_with_delta_pip
+from config import SILVER_TABLES, GOLD_TABLES
 
 
 # ============================================================
@@ -28,22 +29,29 @@ spark = configure_spark_with_delta_pip(builder).getOrCreate()
 # 2. READ SILVER TABLES
 # ============================================================
 
+products_path = str(SILVER_TABLES["products"])
+subcategories_path = str(SILVER_TABLES["product_subcategories"])
+categories_path = str(SILVER_TABLES["product_categories"])
+
+
 products = (
     spark.read
     .format("delta")
-    .load("data/silver/products")
+    .load(products_path)
 )
+
 
 subcategories = (
     spark.read
     .format("delta")
-    .load("data/silver/product_subcategories")
+    .load(subcategories_path)
 )
+
 
 categories = (
     spark.read
     .format("delta")
-    .load("data/silver/product_categories")
+    .load(categories_path)
 )
 
 
@@ -131,7 +139,8 @@ dim_product = (
 # 6. WRITE GOLD DELTA
 # ============================================================
 
-target_path = "data/gold/dim_product"
+target_path = str(GOLD_TABLES["dim_product"])
+
 
 (
     dim_product
@@ -163,8 +172,10 @@ print("=" * 70)
 
 print(f"Rows: {result.count()}")
 
+
 print("\nSchema:")
 result.printSchema()
+
 
 print("\nSample:")
 result.show(10, truncate=False)
@@ -183,14 +194,15 @@ distinct_products = (
     .count()
 )
 
+
 print("\n" + "=" * 70)
 print("PRODUCT KEY VALIDATION")
 print("=" * 70)
 
-print(f"Total products       : {total_products}")
-print(f"Distinct product keys: {distinct_products}")
+print(f"Total products         : {total_products}")
+print(f"Distinct product keys  : {distinct_products}")
 print(
-    f"Duplicate product keys: "
+    f"Duplicate product keys : "
     f"{total_products - distinct_products}"
 )
 
@@ -203,11 +215,13 @@ print("\n" + "=" * 70)
 print("PRODUCT HIERARCHY VALIDATION")
 print("=" * 70)
 
+
 orphan_subcategories = (
     result
     .filter(col("subcategory_name").isNull())
     .count()
 )
+
 
 orphan_categories = (
     result
@@ -215,8 +229,16 @@ orphan_categories = (
     .count()
 )
 
-print(f"Products without subcategory : {orphan_subcategories}")
-print(f"Products without category    : {orphan_categories}")
+
+print(
+    f"Products without subcategory : "
+    f"{orphan_subcategories}"
+)
+
+print(
+    f"Products without category    : "
+    f"{orphan_categories}"
+)
 
 
 # ============================================================
@@ -226,6 +248,7 @@ print(f"Products without category    : {orphan_categories}")
 print("\n" + "=" * 70)
 print("PRODUCTS BY CATEGORY")
 print("=" * 70)
+
 
 (
     result

@@ -1,7 +1,7 @@
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col
 from delta import configure_spark_with_delta_pip
-
+from config import SILVER_TABLES, GOLD_TABLES
 # ============================================================
 # Spark Session
 # ============================================================
@@ -25,11 +25,11 @@ spark = configure_spark_with_delta_pip(builder).getOrCreate()
 # ============================================================
 # Read Silver Territory
 # ============================================================
-
+silver_path = str(SILVER_TABLES["territories"])
 territories = (
     spark.read
     .format("delta")
-    .load("data/silver/territories")
+    .load(silver_path)
 )
 
 # ============================================================
@@ -50,7 +50,7 @@ dim_territory = (
 # Write Gold
 # ============================================================
 
-target_path = "data/gold/dim_territory"
+target_path = str(GOLD_TABLES["dim_territory"])
 
 (
     dim_territory

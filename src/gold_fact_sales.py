@@ -1,6 +1,7 @@
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, round
 from delta import configure_spark_with_delta_pip
+from config import SILVER_TABLES, GOLD_TABLES
 
 
 # ============================================================
@@ -28,10 +29,12 @@ spark = configure_spark_with_delta_pip(builder).getOrCreate()
 # 2. READ SILVER SALES
 # ============================================================
 
+sales_path = str(SILVER_TABLES["sales"])
+
 sales = (
     spark.read
     .format("delta")
-    .load("data/silver/sales")
+    .load(sales_path)
 )
 
 
@@ -39,28 +42,37 @@ sales = (
 # 3. READ GOLD DIMENSIONS
 # ============================================================
 
+dim_product_path = str(GOLD_TABLES["dim_product"])
+dim_date_path = str(GOLD_TABLES["dim_date"])
+dim_customer_path = str(GOLD_TABLES["dim_customer"])
+dim_territory_path = str(GOLD_TABLES["dim_territory"])
+
+
 dim_product = (
     spark.read
     .format("delta")
-    .load("data/gold/dim_product")
+    .load(dim_product_path)
 )
+
 
 dim_date = (
     spark.read
     .format("delta")
-    .load("data/gold/dim_date")
+    .load(dim_date_path)
 )
+
 
 dim_customer = (
     spark.read
     .format("delta")
-    .load("data/gold/dim_customer")
+    .load(dim_customer_path)
 )
+
 
 dim_territory = (
     spark.read
     .format("delta")
-    .load("data/gold/dim_territory")
+    .load(dim_territory_path)
 )
 
 
@@ -203,7 +215,8 @@ fact_sales = (
 # 9. WRITE GOLD FACT
 # ============================================================
 
-target_path = "data/gold/fact_sales"
+target_path = str(GOLD_TABLES["fact_sales"])
+
 
 (
     fact_sales

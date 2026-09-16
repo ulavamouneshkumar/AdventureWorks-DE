@@ -1,6 +1,7 @@
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, to_date
 from delta import configure_spark_with_delta_pip
+from config import BRONZE_TABLES, SILVER_TABLES
 
 
 # ============================================================
@@ -27,11 +28,11 @@ spark = configure_spark_with_delta_pip(builder).getOrCreate()
 # ============================================================
 # 2. READ BRONZE CALENDAR
 # ============================================================
-
+bronze_path = str(BRONZE_TABLES["calendar"])
 calendar = (
     spark.read
     .format("delta")
-    .load("data/bronze/calendar")
+    .load(bronze_path)
 )
 
 
@@ -63,7 +64,7 @@ silver_calendar = (
 # 4. WRITE SILVER DELTA
 # ============================================================
 
-target_path = "data/silver/calendar"
+target_path = str(SILVER_TABLES["calendar"])
 
 (
     silver_calendar

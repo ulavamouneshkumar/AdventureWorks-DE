@@ -10,6 +10,7 @@ from pyspark.sql.functions import (
 )
 
 from delta import configure_spark_with_delta_pip
+from config import GOLD_TABLES
 
 
 # ============================================================
@@ -44,19 +45,19 @@ print("=" * 70)
 fact_sales = (
     spark.read
     .format("delta")
-    .load("data/gold/fact_sales")
+    .load(str(GOLD_TABLES["fact_sales"]))
 )
 
 fact_returns = (
     spark.read
     .format("delta")
-    .load("data/gold/fact_returns")
+    .load(str(GOLD_TABLES["fact_returns"]))
 )
 
 dim_customer = (
     spark.read
     .format("delta")
-    .load("data/gold/dim_customer")
+    .load(str(GOLD_TABLES["dim_customer"]))
 )
 
 print(f"Fact Sales rows     : {fact_sales.count()}")
@@ -314,7 +315,7 @@ customer_performance = (
 # 9. WRITE GOLD TABLE
 # ============================================================
 
-target_path = "data/gold/customer_performance"
+target_path = str(GOLD_TABLES["customer_performance"])
 
 print("\n" + "=" * 70)
 print("WRITING GOLD CUSTOMER PERFORMANCE")

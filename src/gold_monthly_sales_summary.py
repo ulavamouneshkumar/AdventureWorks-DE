@@ -7,6 +7,7 @@ from pyspark.sql.functions import (
 )
 
 from delta import configure_spark_with_delta_pip
+from config import GOLD_TABLES
 
 
 # ============================================================
@@ -41,13 +42,13 @@ print("=" * 70)
 sales_summary = (
     spark.read
     .format("delta")
-    .load("data/gold/sales_summary")
+    .load(str(GOLD_TABLES["sales_summary"]))
 )
 
 dim_date = (
     spark.read
     .format("delta")
-    .load("data/gold/dim_date")
+    .load(str(GOLD_TABLES["dim_date"]))
 )
 
 print(f"Sales Summary rows : {sales_summary.count()}")
@@ -183,7 +184,7 @@ monthly_summary = (
 # 7. WRITE GOLD TABLE
 # ============================================================
 
-target_path = "data/gold/sales_monthly_summary"
+target_path = str(GOLD_TABLES["monthly_sales_summary"])
 
 print("\n" + "=" * 70)
 print("WRITING GOLD MONTHLY SUMMARY")

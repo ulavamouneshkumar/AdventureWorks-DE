@@ -1,7 +1,7 @@
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, to_date, trim
 from delta import configure_spark_with_delta_pip
-
+from config import BRONZE_TABLES, SILVER_TABLES
 
 # ============================================================
 # 1. CREATE SPARK SESSION
@@ -27,11 +27,11 @@ spark = configure_spark_with_delta_pip(builder).getOrCreate()
 # ============================================================
 # 2. READ BRONZE SALES
 # ============================================================
-
+bronze_path = str(BRONZE_TABLES["sales"])
 sales = (
     spark.read
     .format("delta")
-    .load("data/bronze/sales")
+    .load(bronze_path)
 )
 
 
@@ -113,7 +113,7 @@ silver_sales = (
 # 4. WRITE SILVER DELTA
 # ============================================================
 
-target_path = "data/silver/sales"
+target_path = str(SILVER_TABLES["sales"])
 
 (
     silver_sales
