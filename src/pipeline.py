@@ -1,374 +1,220 @@
+"""
+AdventureWorks Data Engineering Pipeline
+
+Purpose:
+    Orchestrates the complete end-to-end data engineering pipeline.
+
+Pipeline flow:
+    Landing → Bronze → Silver → Gold → Data Quality
+
+The pipeline executes each stage as a separate Python process.
+"""
+
+from pathlib import Path
+import os
 import subprocess
 import sys
 import time
-import logging
-from pathlib import Path
 from datetime import datetime
 
-
-# ============================================================
-# CONFIGURATION
-# ============================================================
-
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-
-SRC_DIR = PROJECT_ROOT / "src"
-
-LOG_DIR = PROJECT_ROOT / "logs"
-
-LOG_DIR.mkdir(
-    parents=True,
-    exist_ok=True
-)
-
-LOG_FILE = (
-    LOG_DIR /
-    f"pipeline_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
-)
+from config import PROJECT_ROOT, SRC_DIR, LOG_DIR
 
 
 # ============================================================
-# LOGGING CONFIGURATION
-# ============================================================
-
-logging.basicConfig(
-    level=logging.INFO,
-    format=(
-        "%(asctime)s | "
-        "%(levelname)s | "
-        "%(message)s"
-    ),
-    handlers=[
-        logging.FileHandler(LOG_FILE),
-        logging.StreamHandler()
-    ]
-)
-
-logger = logging.getLogger("AdventureWorksPipeline")
-
-
-# ============================================================
-# PIPELINE STAGES
+# PIPELINE CONFIGURATION
 # ============================================================
 
 PIPELINE_STAGES = [
-
     # --------------------------------------------------------
     # BRONZE
     # --------------------------------------------------------
-
-    (
-        "Bronze Ingestion - Dimensions",
-        "bronze_ingestion.py"
-    ),
-
-    (
-        "Bronze Ingestion - Sales",
-        "sales_bronze_ingestion.py"
-    ),
-
+    ("Bronze - Dimension Ingestion", "bronze_ingestion.py"),
+    ("Bronze - Sales Ingestion", "sales_bronze_ingestion.py"),
 
     # --------------------------------------------------------
     # SILVER
     # --------------------------------------------------------
-
-    (
-        "Silver Calendar",
-        "silver_calendar.py"
-    ),
-
-    (
-        "Silver Customers",
-        "silver_customers.py"
-    ),
-
-    (
-        "Silver Product Categories",
-        "silver_product_categories.py"
-    ),
-
-    (
-        "Silver Product Subcategories",
-        "silver_product_subcategories.py"
-    ),
-
-    (
-        "Silver Products",
-        "silver_products.py"
-    ),
-
-    (
-        "Silver Territories",
-        "silver_territories.py"
-    ),
-
-    (
-        "Silver Returns",
-        "silver_returns.py"
-    ),
-
-    (
-        "Silver Sales",
-        "silver_sales.py"
-    ),
-
+    ("Silver - Customers", "silver_customers.py"),
+    ("Silver - Products", "silver_products.py"),
+    ("Silver - Product Categories", "silver_product_categories.py"),
+    ("Silver - Product Subcategories", "silver_product_subcategories.py"),
+    ("Silver - Territories", "silver_territories.py"),
+    ("Silver - Calendar", "silver_calendar.py"),
+    ("Silver - Returns", "silver_returns.py"),
+    ("Silver - Sales", "silver_sales.py"),
 
     # --------------------------------------------------------
-    # GOLD DIMENSIONS
+    # GOLD - DIMENSIONS
     # --------------------------------------------------------
-
-    (
-        "Gold Dimension Date",
-        "gold_dim_date.py"
-    ),
-
-    (
-        "Gold Dimension Customer",
-        "gold_dim_customer.py"
-    ),
-
-    (
-        "Gold Dimension Product",
-        "gold_dim_product.py"
-    ),
-
-    (
-        "Gold Dimension Territory",
-        "gold_dim_territory.py"
-    ),
-
+    ("Gold - Date Dimension", "gold_dim_date.py"),
+    ("Gold - Customer Dimension", "gold_dim_customer.py"),
+    ("Gold - Product Dimension", "gold_dim_product.py"),
+    ("Gold - Territory Dimension", "gold_dim_territory.py"),
 
     # --------------------------------------------------------
-    # GOLD FACTS
+    # GOLD - FACTS
     # --------------------------------------------------------
-
-    (
-        "Gold Fact Sales",
-        "gold_fact_sales.py"
-    ),
-
-    (
-        "Gold Fact Returns",
-        "gold_fact_returns.py"
-    ),
-
+    ("Gold - Sales Fact", "gold_fact_sales.py"),
+    ("Gold - Returns Fact", "gold_fact_returns.py"),
 
     # --------------------------------------------------------
-    # GOLD ANALYTICS
+    # GOLD - ANALYTICS
     # --------------------------------------------------------
-
-    (
-        "Gold Sales Summary",
-        "gold_sales_summary.py"
-    ),
-
-    (
-        "Gold Monthly Sales Summary",
-        "gold_monthly_sales_summary.py"
-    ),
-
-    (
-        "Gold Product Performance",
-        "gold_product_performance.py"
-    ),
-
-    (
-        "Gold Customer Performance",
-        "gold_customer_performance.py"
-    ),
-
+    ("Gold - Sales Summary", "gold_sales_summary.py"),
+    ("Gold - Monthly Sales Summary", "gold_monthly_sales_summary.py"),
+    ("Gold - Product Performance", "gold_product_performance.py"),
+    ("Gold - Customer Performance", "gold_customer_performance.py"),
 
     # --------------------------------------------------------
     # DATA QUALITY
     # --------------------------------------------------------
-
-    (
-        "Data Quality Framework",
-        "data_quality/run_quality_checks.py"
-    ),
+    ("Data Quality Checks", "data_quality/run_quality_checks.py"),
 ]
 
 
 # ============================================================
-# PIPELINE HEADER
+# LOGGING
 # ============================================================
 
-def print_header():
+def create_log_file():
+    """
+    Creates a timestamped pipeline log file.
+    """
 
-    logger.info("")
-    logger.info("=" * 80)
-    logger.info("ADVENTUREWORKS DATA ENGINEERING PIPELINE")
-    logger.info("=" * 80)
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
 
-    logger.info(
-        "Pipeline started at: %s",
-        datetime.now().strftime(
-            "%Y-%m-%d %H:%M:%S"
-        )
-    )
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    logger.info(
-        "Project root: %s",
-        PROJECT_ROOT
-    )
+    return LOG_DIR / f"pipeline_{timestamp}.log"
 
-    logger.info(
-        "Total stages: %d",
-        len(PIPELINE_STAGES)
-    )
 
-    logger.info("=" * 80)
+def write_log(log_file, message):
+    """
+    Writes a message to both the terminal and log file.
+    """
+
+    print(message)
+
+    with open(log_file, "a", encoding="utf-8") as file:
+        file.write(message + "\n")
 
 
 # ============================================================
-# RUN SINGLE STAGE
+# RUN PIPELINE STAGE
 # ============================================================
 
-def run_stage(
-    stage_number,
-    stage_name,
-    script_name
-):
+def run_stage(stage_number, total_stages, stage_name, script_name, log_file):
+    """
+    Executes one pipeline stage.
+
+    Returns:
+        True  -> stage succeeded
+        False -> stage failed
+    """
+
+    print("\n" + "=" * 80)
+    print(f"STAGE {stage_number}/{total_stages}: {stage_name}")
+    print("=" * 80)
+
+    write_log(
+        log_file,
+        f"\n{'=' * 80}\n"
+        f"STAGE {stage_number}/{total_stages}: {stage_name}\n"
+        f"Script: {script_name}\n"
+        f"{'=' * 80}"
+    )
 
     script_path = SRC_DIR / script_name
 
-    logger.info("")
-    logger.info("=" * 80)
-
-    logger.info(
-        "STAGE %d/%d",
-        stage_number,
-        len(PIPELINE_STAGES)
-    )
-
-    logger.info(
-        "Stage: %s",
-        stage_name
-    )
-
-    logger.info(
-        "Script: %s",
-        script_name
-    )
-
-    logger.info("=" * 80)
-
-
-    # --------------------------------------------------------
-    # Check script exists
-    # --------------------------------------------------------
-
     if not script_path.exists():
-
-        logger.error(
-            "Script not found: %s",
-            script_path
+        error_message = (
+            f"ERROR: Script not found: {script_path}"
         )
 
-        return False, 0
+        write_log(log_file, error_message)
 
+        return False
+
+    start_time = time.time()
 
     # --------------------------------------------------------
-    # Start timer
+    # Environment
     # --------------------------------------------------------
 
-    start_time = time.perf_counter()
+    environment = os.environ.copy()
 
+    # Make src/ available for imports such as:
+    # from config import ...
+    environment["PYTHONPATH"] = str(SRC_DIR)
+
+    # --------------------------------------------------------
+    # Execute script
+    # --------------------------------------------------------
 
     try:
 
-        logger.info(
-            "Starting stage: %s",
-            stage_name
-        )
-
-
-        # ----------------------------------------------------
-        # Execute Python script
-        # ----------------------------------------------------
-
         result = subprocess.run(
-            [
-                sys.executable,
-                str(script_path)
-            ],
-
+            [sys.executable, str(script_path)],
             cwd=PROJECT_ROOT,
-
-            env={
-                **__import__("os").environ,
-                "PYTHONPATH": str(SRC_DIR)
-            },
-
+            env=environment,
             text=True,
-
-            check=False
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
         )
 
+        # ----------------------------------------------------
+        # Write complete stage output to log
+        # ----------------------------------------------------
+
+        if result.stdout:
+            print(result.stdout)
+
+            with open(log_file, "a", encoding="utf-8") as file:
+                file.write(result.stdout)
+
+        elapsed_time = time.time() - start_time
 
         # ----------------------------------------------------
-        # Calculate execution time
-        # ----------------------------------------------------
-
-        elapsed_time = (
-            time.perf_counter()
-            - start_time
-        )
-
-
-        # ----------------------------------------------------
-        # Check result
+        # Success
         # ----------------------------------------------------
 
         if result.returncode == 0:
 
-            logger.info(
-                "Stage completed successfully: %s",
-                stage_name
+            success_message = (
+                f"\n✓ SUCCESS: {stage_name}"
+                f" | Time: {elapsed_time:.2f} seconds"
             )
 
-            logger.info(
-                "Execution time: %.2f seconds",
-                elapsed_time
-            )
+            write_log(log_file, success_message)
 
-            return True, elapsed_time
+            return True
 
+        # ----------------------------------------------------
+        # Failure
+        # ----------------------------------------------------
 
-        else:
+        failure_message = (
+            f"\n✗ FAILED: {stage_name}"
+            f" | Exit Code: {result.returncode}"
+            f" | Time: {elapsed_time:.2f} seconds"
+        )
 
-            logger.error(
-                "Stage FAILED: %s",
-                stage_name
-            )
+        write_log(log_file, failure_message)
 
-            logger.error(
-                "Exit code: %d",
-                result.returncode
-            )
-
-            logger.error(
-                "Execution time: %.2f seconds",
-                elapsed_time
-            )
-
-            return False, elapsed_time
-
+        return False
 
     except Exception as error:
 
-        elapsed_time = (
-            time.perf_counter()
-            - start_time
+        elapsed_time = time.time() - start_time
+
+        error_message = (
+            f"\n✗ ERROR running {stage_name}: {error}"
+            f" | Time: {elapsed_time:.2f} seconds"
         )
 
-        logger.exception(
-            "Unexpected error in stage '%s': %s",
-            stage_name,
-            error
-        )
+        write_log(log_file, error_message)
 
-        return False, elapsed_time
+        return False
 
 
 # ============================================================
@@ -377,150 +223,174 @@ def run_stage(
 
 def main():
 
-    pipeline_start = time.perf_counter()
+    pipeline_start = time.time()
 
-    print_header()
+    total_stages = len(PIPELINE_STAGES)
 
+    log_file = create_log_file()
 
-    stage_results = []
+    # --------------------------------------------------------
+    # Header
+    # --------------------------------------------------------
 
+    header = f"""
+{'=' * 80}
+ADVENTUREWORKS DATA ENGINEERING PIPELINE
+{'=' * 80}
 
-    # ========================================================
-    # EXECUTE STAGES
-    # ========================================================
+Start Time   : {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+Project Root : {PROJECT_ROOT}
+Source Dir   : {SRC_DIR}
+Log File     : {log_file}
 
-    for stage_number, (
-        stage_name,
-        script_name
-    ) in enumerate(
+Total Stages : {total_stages}
+
+Pipeline Flow:
+    Landing
+        ↓
+    Bronze
+        ↓
+    Silver
+        ↓
+    Gold
+        ↓
+    Data Quality
+{'=' * 80}
+"""
+
+    write_log(log_file, header)
+
+    # --------------------------------------------------------
+    # Track results
+    # --------------------------------------------------------
+
+    successful_stages = []
+    failed_stages = []
+
+    # --------------------------------------------------------
+    # Execute stages
+    # --------------------------------------------------------
+
+    for stage_number, (stage_name, script_name) in enumerate(
         PIPELINE_STAGES,
         start=1
     ):
 
-        success, elapsed_time = run_stage(
-            stage_number,
-            stage_name,
-            script_name
+        success = run_stage(
+            stage_number=stage_number,
+            total_stages=total_stages,
+            stage_name=stage_name,
+            script_name=script_name,
+            log_file=log_file,
         )
 
+        if success:
 
-        stage_results.append(
-            {
-                "stage": stage_name,
-                "script": script_name,
-                "status": (
-                    "PASSED"
-                    if success
-                    else "FAILED"
-                ),
-                "execution_time": elapsed_time
-            }
-        )
+            successful_stages.append(stage_name)
 
+        else:
 
-        # ----------------------------------------------------
-        # STOP PIPELINE ON FAILURE
-        # ----------------------------------------------------
+            failed_stages.append(stage_name)
 
-        if not success:
+            # ------------------------------------------------
+            # Fail-fast behavior
+            # ------------------------------------------------
 
-            logger.error("")
-            logger.error("=" * 80)
-
-            logger.error(
-                "PIPELINE FAILED"
+            write_log(
+                log_file,
+                "\nPIPELINE STOPPED بسبب stage failure."
             )
 
-            logger.error(
-                "Failed stage: %s",
-                stage_name
-            )
+            break
 
-            logger.error(
-                "Pipeline stopped to prevent downstream "
-                "processing on invalid data."
-            )
+    # --------------------------------------------------------
+    # Final statistics
+    # --------------------------------------------------------
 
-            logger.error("=" * 80)
+    total_time = time.time() - pipeline_start
 
-            return 1
+    completed_stages = len(successful_stages)
+    failed_count = len(failed_stages)
 
+    # --------------------------------------------------------
+    # Final summary
+    # --------------------------------------------------------
 
-    # ========================================================
-    # PIPELINE COMPLETED
-    # ========================================================
+    print("\n" + "=" * 80)
+    print("PIPELINE SUMMARY")
+    print("=" * 80)
 
-    total_time = (
-        time.perf_counter()
-        - pipeline_start
-    )
+    print(f"Total Stages     : {total_stages}")
+    print(f"Completed Stages : {completed_stages}")
+    print(f"Failed Stages    : {failed_count}")
+    print(f"Total Time       : {total_time:.2f} seconds")
+    print(f"Total Time       : {total_time / 60:.2f} minutes")
+    print(f"Log File         : {log_file}")
 
+    # --------------------------------------------------------
+    # Successful stages
+    # --------------------------------------------------------
 
-    logger.info("")
-    logger.info("=" * 80)
-    logger.info("PIPELINE EXECUTION SUMMARY")
-    logger.info("=" * 80)
+    if successful_stages:
 
+        print("\nSuccessful Stages:")
 
-    for result in stage_results:
+        for stage in successful_stages:
+            print(f"  ✓ {stage}")
 
-        logger.info(
-            "%-40s | %-7s | %.2f sec",
-            result["stage"],
-            result["status"],
-            result["execution_time"]
-        )
+    # --------------------------------------------------------
+    # Failed stages
+    # --------------------------------------------------------
 
+    if failed_stages:
 
-    # ========================================================
-    # FINAL STATUS
-    # ========================================================
+        print("\nFailed Stages:")
 
-    logger.info("")
-    logger.info("=" * 80)
+        for stage in failed_stages:
+            print(f"  ✗ {stage}")
 
-    logger.info(
-        "Total stages executed : %d",
-        len(stage_results)
-    )
+    # --------------------------------------------------------
+    # Final status
+    # --------------------------------------------------------
 
-    logger.info(
-        "Passed stages         : %d",
-        sum(
-            1
-            for result in stage_results
-            if result["status"] == "PASSED"
-        )
-    )
+    if failed_count == 0:
 
-    logger.info(
-        "Failed stages         : %d",
-        sum(
-            1
-            for result in stage_results
-            if result["status"] == "FAILED"
-        )
-    )
+        final_message = f"""
+{'=' * 80}
+PIPELINE COMPLETED SUCCESSFULLY
+{'=' * 80}
 
-    logger.info(
-        "Total pipeline time    : %.2f seconds",
-        total_time
-    )
+Stages Completed : {completed_stages}/{total_stages}
+Total Runtime    : {total_time / 60:.2f} minutes
+Log File         : {log_file}
 
-    logger.info(
-        "Pipeline log           : %s",
-        LOG_FILE
-    )
+STATUS: PASSED
+{'=' * 80}
+"""
 
-    logger.info("")
-    logger.info(
-        "OVERALL PIPELINE STATUS : PASSED"
-    )
+        write_log(log_file, final_message)
 
-    logger.info("=" * 80)
+        return 0
 
+    else:
 
-    return 0
+        final_message = f"""
+{'=' * 80}
+PIPELINE FAILED
+{'=' * 80}
+
+Stages Completed : {completed_stages}/{total_stages}
+Failed Stages    : {failed_count}
+Total Runtime    : {total_time / 60:.2f} minutes
+Log File         : {log_file}
+
+STATUS: FAILED
+{'=' * 80}
+"""
+
+        write_log(log_file, final_message)
+
+        return 1
 
 
 # ============================================================
@@ -528,7 +398,4 @@ def main():
 # ============================================================
 
 if __name__ == "__main__":
-
-    sys.exit(
-        main()
-    )
+    sys.exit(main())
