@@ -2,31 +2,21 @@ from pathlib import Path
 
 
 # ============================================================
-# PROJECT ROOT
+# PROJECT PATHS
 # ============================================================
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 SRC_DIR = PROJECT_ROOT / "src"
-# ============================================================
-# DATA DIRECTORIES
-# ============================================================
 
 DATA_DIR = PROJECT_ROOT / "data"
 
 LANDING_DIR = DATA_DIR / "landing"
-
-BRONZE_DIR = DATA_DIR / "bronze"
-
-SILVER_DIR = DATA_DIR / "silver"
-
-GOLD_DIR = DATA_DIR / "gold"
-
 INCREMENTAL_DIR = LANDING_DIR / "incremental"
 
-# ============================================================
-# LOG DIRECTORY
-# ============================================================
+BRONZE_DIR = DATA_DIR / "bronze"
+SILVER_DIR = DATA_DIR / "silver"
+GOLD_DIR = DATA_DIR / "gold"
 
 LOG_DIR = PROJECT_ROOT / "logs"
 
@@ -38,52 +28,42 @@ LOG_DIR = PROJECT_ROOT / "logs"
 SOURCE_FILES = {
 
     "calendar":
-        LANDING_DIR /
-        "AdventureWorks_Calendar.csv",
+        LANDING_DIR / "AdventureWorks_Calendar.csv",
 
     "customers":
-        LANDING_DIR /
-        "AdventureWorks_Customers.csv",
+        LANDING_DIR / "AdventureWorks_Customers.csv",
 
     "product_categories":
-        LANDING_DIR /
-        "AdventureWorks_Product_Categories.csv",
+        LANDING_DIR / "AdventureWorks_Product_Categories.csv",
 
     "product_subcategories":
-        LANDING_DIR /
-        "AdventureWorks_Product_Subcategories.csv",
+        LANDING_DIR / "AdventureWorks_Product_Subcategories.csv",
 
     "products":
-        LANDING_DIR /
-        "AdventureWorks_Products.csv",
+        LANDING_DIR / "AdventureWorks_Products.csv",
 
     "returns":
-        LANDING_DIR /
-        "AdventureWorks_Returns.csv",
+        LANDING_DIR / "AdventureWorks_Returns.csv",
 
     "territories":
-        LANDING_DIR /
-        "AdventureWorks_Territories.csv",
+        LANDING_DIR / "AdventureWorks_Territoris.csv",
 
     "sales_2015":
-        LANDING_DIR /
-        "AdventureWorks_Sales_2015.csv",
+        LANDING_DIR / "AdventureWorks_Sales_2015.csv",
 
     "sales_2016":
-        LANDING_DIR /
-        "AdventureWorks_Sales_2016.csv",
+        LANDING_DIR / "AdventureWorks_Sales_2016.csv",
 
     "sales_2017":
-        LANDING_DIR /
-        "AdventureWorks_Sales_2017.csv",
+        LANDING_DIR / "AdventureWorks_Sales_2017.csv",
 
-        "sales_incremental": 
+    "sales_incremental":
         INCREMENTAL_DIR / "new_sales.csv",
 }
 
 
 # ============================================================
-# BRONZE TABLE LOCATIONS
+# BRONZE TABLES
 # ============================================================
 
 BRONZE_TABLES = {
@@ -115,7 +95,7 @@ BRONZE_TABLES = {
 
 
 # ============================================================
-# SILVER TABLE LOCATIONS
+# SILVER TABLES
 # ============================================================
 
 SILVER_TABLES = {
@@ -147,7 +127,7 @@ SILVER_TABLES = {
 
 
 # ============================================================
-# GOLD TABLE LOCATIONS
+# GOLD TABLES
 # ============================================================
 
 GOLD_TABLES = {
@@ -182,3 +162,12 @@ GOLD_TABLES = {
     "customer_performance":
         GOLD_DIR / "customer_performance",
 }
+
+
+# ============================================================
+# PIPELINE RETRY CONFIGURATION
+# ============================================================
+
+MAX_RETRIES = 2
+
+RETRY_DELAY_SECONDS = 5
