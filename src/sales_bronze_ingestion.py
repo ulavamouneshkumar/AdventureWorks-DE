@@ -1,6 +1,9 @@
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import current_timestamp, input_file_name, lit
+from pyspark.sql.functions import current_timestamp, lit
 from delta import configure_spark_with_delta_pip
+from delta.tables import DeltaTable
+
+from config import SOURCE_FILES, BRONZE_TABLES
 
 
 # ============================================================
@@ -28,29 +31,33 @@ spark = configure_spark_with_delta_pip(builder).getOrCreate()
 # 2. SOURCE FILES
 # ============================================================
 
-sales_files = [
+full_load_files = [
     (
         "2015",
-        "data/landing/AdventureWorks_Sales_2015.csv"
+        str(SOURCE_FILES["sales_2015"])
     ),
     (
         "2016",
-        "data/landing/AdventureWorks_Sales_2016.csv"
+        str(SOURCE_FILES["sales_2016"])
     ),
     (
         "2017",
-        "data/landing/AdventureWorks_Sales_2017.csv"
+        str(SOURCE_FILES["sales_2017"])
     )
 ]
 
+incremental_file = str(
+    SOURCE_FILES["sales_incremental"]
+)
+
 
 # ============================================================
-# 3. READ EACH SALES FILE
+# 3. READ FULL LOAD FILES
 # ============================================================
 
 sales_dataframes = []
 
-for year, file_path in sales_files:
+for year, file_path in full_load_files:
 
     print("\n" + "=" * 70)
     print(f"Reading Sales {year}")
@@ -69,7 +76,6 @@ for year, file_path in sales_files:
 
     print(f"Rows: {row_count}")
 
-    # Add source year
     df = df.withColumn(
         "_source_year",
         lit(year)
@@ -79,10 +85,10 @@ for year, file_path in sales_files:
 
 
 # ============================================================
-# 4. COMBINE ALL SALES DATA
+# 4. COMBINE FULL LOAD DATA
 # ============================================================
 
-sales = (
+full_sales = (
     sales_dataframes[0]
     .unionByName(sales_dataframes[1])
     .unionByName(sales_dataframes[2])
@@ -90,62 +96,170 @@ sales = (
 
 
 # ============================================================
-# 5. ADD INGESTION METADATA
+# 5. CHECK WHETHER INCREMENTAL FILE EXISTS
 # ============================================================
 
-bronze_sales = (
-    sales
-    .withColumn(
-        "_ingestion_timestamp",
-        current_timestamp()
+from pathlib import Path
+
+incremental_path = Path(incremental_file)
+
+if incremental_path.exists():
+
+    print("\n" + "=" * 70)
+    print("Incremental source detected")
+    print(f"File: {incremental_file}")
+    print("=" * 70)
+
+    incremental_sales = (
+        spark.read
+        .option("header", True)
+        .option("inferSchema", True)
+        .option("mode", "PERMISSIVE")
+        .csv(incremental_file)
     )
-    .withColumn(
-        "_source_file",
-        input_file_name()
+
+    incremental_count = incremental_sales.count()
+
+    print(f"Incremental rows: {incremental_count}")
+
+    incremental_sales = incremental_sales.withColumn(
+        "_source_year",
+        lit("incremental")
     )
+
+else:
+
+    print("\nNo incremental source detected.")
+
+    incremental_sales = None
+
+
+# ============================================================
+# 6. DEFINE BRONZE TARGET
+# ============================================================
+
+target_path = str(
+    BRONZE_TABLES["sales"]
 )
-
-
-# ============================================================
-# 6. VALIDATE COMBINED DATA
-# ============================================================
 
 print("\n" + "#" * 70)
-print("# COMBINED SALES")
+print("# BRONZE DELTA LOAD")
 print("#" * 70)
 
-total_rows = bronze_sales.count()
-
-print(f"Total Sales rows: {total_rows}")
-
-print("\nRows by source year:")
-
-(
-    bronze_sales
-    .groupBy("_source_year")
-    .count()
-    .orderBy("_source_year")
-    .show()
-)
+print(f"Target: {target_path}")
 
 
 # ============================================================
-# 7. WRITE TO BRONZE DELTA
+# 7. INITIAL LOAD
 # ============================================================
 
-target_path = "data/bronze/sales"
+if not DeltaTable.isDeltaTable(
+    spark,
+    target_path
+):
 
-(
-    bronze_sales
-    .write
-    .format("delta")
-    .mode("overwrite")
-    .save(target_path)
-)
+    print("\nDelta table does not exist.")
+    print("Performing INITIAL FULL LOAD...")
+
+    bronze_sales = (
+        full_sales
+        .withColumn(
+            "_ingestion_timestamp",
+            current_timestamp()
+        )
+        .withColumn(
+            "_source_file",
+            lit("full_load")
+        )
+    )
+
+    (
+        bronze_sales
+        .write
+        .format("delta")
+        .mode("overwrite")
+        .save(target_path)
+    )
+
+    print("Initial full load completed.")
 
 
 # ============================================================
-# 8. READ DELTA TABLE BACK
+# 8. EXISTING DELTA TABLE
+# ============================================================
+
+else:
+
+    delta_table = DeltaTable.forPath(
+        spark,
+        target_path
+    )
+
+    # --------------------------------------------------------
+    # ONLY MERGE INCREMENTAL DATA
+    # --------------------------------------------------------
+
+    if incremental_sales is not None:
+
+        print("\nPerforming INCREMENTAL MERGE...")
+
+        bronze_incremental = (
+            incremental_sales
+            .withColumn(
+                "_ingestion_timestamp",
+                current_timestamp()
+            )
+            .withColumn(
+                "_source_file",
+                lit(incremental_file)
+            )
+        )
+
+        incremental_count = bronze_incremental.count()
+
+        print(
+            f"Records presented for MERGE: "
+            f"{incremental_count}"
+        )
+
+        # ----------------------------------------------------
+        # Business key
+        #
+        # OrderNumber + OrderLineItem
+        # ----------------------------------------------------
+
+        merge_condition = """
+            target.OrderNumber = source.OrderNumber
+            AND
+            target.OrderLineItem = source.OrderLineItem
+        """
+
+        (
+            delta_table.alias("target")
+            .merge(
+                bronze_incremental.alias("source"),
+                merge_condition
+            )
+            .whenMatchedUpdateAll()
+            .whenNotMatchedInsertAll()
+            .execute()
+        )
+
+        print("Incremental MERGE completed.")
+
+    else:
+
+        print(
+            "\nNo incremental data available."
+        )
+
+        print(
+            "Existing Bronze table remains unchanged."
+        )
+
+
+# ============================================================
+# 9. READ BRONZE DELTA TABLE
 # ============================================================
 
 result = (
@@ -156,7 +270,7 @@ result = (
 
 
 # ============================================================
-# 9. VALIDATE BRONZE TABLE
+# 10. BRONZE VALIDATION
 # ============================================================
 
 bronze_count = result.count()
@@ -165,25 +279,95 @@ print("\n" + "#" * 70)
 print("# BRONZE SALES VALIDATION")
 print("#" * 70)
 
-print(f"Expected rows : 56046")
-print(f"Bronze rows   : {bronze_count}")
-
-if bronze_count == 56046:
-    print("Row count validation : PASSED")
-else:
-    print("Row count validation : FAILED")
-
-
-print("\nSchema:")
-result.printSchema()
-
-
-print("\nSample records:")
-result.show(10, truncate=False)
+print(f"Bronze rows : {bronze_count}")
 
 
 # ============================================================
-# 10. STOP SPARK
+# 11. BUSINESS KEY VALIDATION
+# ============================================================
+
+duplicate_keys = (
+    result
+    .groupBy(
+        "OrderNumber",
+        "OrderLineItem"
+    )
+    .count()
+    .filter("count > 1")
+)
+
+duplicate_count = duplicate_keys.count()
+
+print("\n" + "#" * 70)
+print("# BUSINESS KEY VALIDATION")
+print("#" * 70)
+
+print(
+    "Duplicate OrderNumber + OrderLineItem : "
+    f"{duplicate_count}"
+)
+
+if duplicate_count == 0:
+
+    print(
+        "Business key validation : PASSED"
+    )
+
+else:
+
+    print(
+        "Business key validation : FAILED"
+    )
+
+
+# ============================================================
+# 12. SOURCE YEAR VALIDATION
+# ============================================================
+
+print("\n" + "#" * 70)
+print("# SOURCE YEAR VALIDATION")
+print("#" * 70)
+
+(
+    result
+    .groupBy("_source_year")
+    .count()
+    .orderBy("_source_year")
+    .show()
+)
+
+
+# ============================================================
+# 13. FINAL VALIDATION
+# ============================================================
+
+if duplicate_count == 0:
+
+    print("\n" + "=" * 70)
+    print("BRONZE SALES LOAD : PASSED")
+    print("=" * 70)
+
+else:
+
+    print("\n" + "=" * 70)
+    print("BRONZE SALES LOAD : FAILED")
+    print("=" * 70)
+
+
+# ============================================================
+# 14. SAMPLE RECORDS
+# ============================================================
+
+print("\nSample records:")
+
+result.show(
+    10,
+    truncate=False
+)
+
+
+# ============================================================
+# 15. STOP SPARK
 # ============================================================
 
 spark.stop()

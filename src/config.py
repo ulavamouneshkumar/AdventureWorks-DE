@@ -22,6 +22,7 @@ SILVER_DIR = DATA_DIR / "silver"
 
 GOLD_DIR = DATA_DIR / "gold"
 
+INCREMENTAL_DIR = LANDING_DIR / "incremental"
 
 # ============================================================
 # LOG DIRECTORY
@@ -75,6 +76,9 @@ SOURCE_FILES = {
     "sales_2017":
         LANDING_DIR /
         "AdventureWorks_Sales_2017.csv",
+
+        "sales_incremental": 
+        INCREMENTAL_DIR / "new_sales.csv",
 }
 
 
