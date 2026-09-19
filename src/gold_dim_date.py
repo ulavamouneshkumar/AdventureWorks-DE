@@ -1,21 +1,26 @@
+# ============================================================
+# GOLD DIM DATE - OPTIMIZED
+# ============================================================
+
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import (
     col,
+    date_format,
     year,
     quarter,
     month,
     monthname,
     dayofmonth,
     dayofweek,
-    date_format,
     when,
     concat,
     lit,
-    lpad
+    lpad,
 )
-
 from delta import configure_spark_with_delta_pip
+
 from config import SILVER_TABLES, GOLD_TABLES
+
 
 # ============================================================
 # 1. CREATE SPARK SESSION
@@ -41,7 +46,9 @@ spark = configure_spark_with_delta_pip(builder).getOrCreate()
 # ============================================================
 # 2. READ SILVER CALENDAR
 # ============================================================
+
 silver_path = str(SILVER_TABLES["calendar"])
+
 calendar = (
     spark.read
     .format("delta")
@@ -55,71 +62,20 @@ calendar = (
 
 dim_date = (
     calendar
-
-    # --------------------------------------------------------
-    # DATE KEY
-    # Example: 2015-01-10 → 20150110
-    # --------------------------------------------------------
-
     .withColumn(
         "date_key",
-        date_format(
-            col("date"),
-            "yyyyMMdd"
-        ).cast("integer")
+        date_format(col("date"), "yyyyMMdd").cast("integer")
     )
-
-    # --------------------------------------------------------
-    # CALENDAR ATTRIBUTES
-    # --------------------------------------------------------
-
-    .withColumn(
-        "calendar_year",
-        year(col("date"))
-    )
-
-    .withColumn(
-        "calendar_quarter",
-        quarter(col("date"))
-    )
-
-    .withColumn(
-        "month",
-        month(col("date"))
-    )
-
-    .withColumn(
-        "month_name",
-        monthname(col("date"))
-    )
-
-    .withColumn(
-        "day",
-        dayofmonth(col("date"))
-    )
-
-    .withColumn(
-        "day_of_week",
-        dayofweek(col("date"))
-    )
-
+    .withColumn("calendar_year", year(col("date")))
+    .withColumn("calendar_quarter", quarter(col("date")))
+    .withColumn("month", month(col("date")))
+    .withColumn("month_name", monthname(col("date")))
+    .withColumn("day", dayofmonth(col("date")))
+    .withColumn("day_of_week", dayofweek(col("date")))
     .withColumn(
         "day_name",
-        date_format(
-            col("date"),
-            "EEEE"
-        )
+        date_format(col("date"), "EEEE")
     )
-
-    # --------------------------------------------------------
-    # FINANCIAL QUARTER
-    #
-    # Apr-Jun  → Q1
-    # Jul-Sep  → Q2
-    # Oct-Dec  → Q3
-    # Jan-Mar  → Q4
-    # --------------------------------------------------------
-
     .withColumn(
         "financial_quarter",
         when(
@@ -136,19 +92,10 @@ dim_date = (
         )
         .otherwise("Q4")
     )
-
-    # --------------------------------------------------------
-    # FINANCIAL YEAR
-    #
-    # Apr 2015 - Mar 2016 → FY2015-16
-    # Jan 2016            → FY2015-16
-    # --------------------------------------------------------
-
     .withColumn(
         "financial_year",
         when(
             month(col("date")) >= 4,
-
             concat(
                 lit("FY"),
                 year(col("date")),
@@ -161,7 +108,6 @@ dim_date = (
             )
         )
         .otherwise(
-
             concat(
                 lit("FY"),
                 year(col("date")) - 1,
@@ -174,27 +120,16 @@ dim_date = (
             )
         )
     )
-
-    # --------------------------------------------------------
-    # SELECT FINAL GOLD COLUMNS
-    # --------------------------------------------------------
-
     .select(
         "date_key",
         "date",
-
-        # Calendar
         "calendar_year",
         "calendar_quarter",
-
-        # Month / Day
         "month",
         "month_name",
         "day",
         "day_of_week",
         "day_name",
-
-        # Financial calendar
         "financial_year",
         "financial_quarter"
     )
@@ -221,10 +156,13 @@ target_path = str(GOLD_TABLES["dim_date"])
 # 5. READ BACK FOR VALIDATION
 # ============================================================
 
+# Cache because the same validation DataFrame is used by
+# multiple actions below.
 result = (
     spark.read
     .format("delta")
     .load(target_path)
+    .cache()
 )
 
 
@@ -236,7 +174,10 @@ print("\n" + "=" * 70)
 print("GOLD DIM DATE")
 print("=" * 70)
 
-print(f"Rows: {result.count()}")
+# One count is reused throughout validation.
+total_rows = result.count()
+
+print(f"Rows: {total_rows}")
 
 print("\nSchema:")
 result.printSchema()
@@ -251,17 +192,19 @@ result.show(10, truncate=False)
 
 print("\nDate range:")
 
-result.selectExpr(
-    "min(date) as min_date",
-    "max(date) as max_date"
-).show()
+(
+    result
+    .selectExpr(
+        "min(date) as min_date",
+        "max(date) as max_date"
+    )
+    .show()
+)
 
 
 # ============================================================
 # 8. DATE KEY VALIDATION
 # ============================================================
-
-total_rows = result.count()
 
 distinct_date_keys = (
     result
@@ -298,7 +241,8 @@ print("\nFinancial quarter distribution:")
 
 
 # ============================================================
-# 10. STOP SPARK
+# 10. CLEANUP
 # ============================================================
 
+result.unpersist()
 spark.stop()

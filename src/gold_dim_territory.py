@@ -2,6 +2,8 @@ from pyspark.sql import SparkSession
 from pyspark.sql.functions import col
 from delta import configure_spark_with_delta_pip
 from config import SILVER_TABLES, GOLD_TABLES
+
+
 # ============================================================
 # Spark Session
 # ============================================================
@@ -22,15 +24,19 @@ builder = (
 
 spark = configure_spark_with_delta_pip(builder).getOrCreate()
 
+
 # ============================================================
 # Read Silver Territory
 # ============================================================
+
 silver_path = str(SILVER_TABLES["territories"])
+
 territories = (
     spark.read
     .format("delta")
     .load(silver_path)
 )
+
 
 # ============================================================
 # Create Gold Dimension
@@ -46,6 +52,7 @@ dim_territory = (
     )
 )
 
+
 # ============================================================
 # Write Gold
 # ============================================================
@@ -60,21 +67,28 @@ target_path = str(GOLD_TABLES["dim_territory"])
     .save(target_path)
 )
 
+
 # ============================================================
 # Validation
 # ============================================================
 
+# Cache because the same result DataFrame is used by multiple
+# validation actions.
 result = (
     spark.read
     .format("delta")
     .load(target_path)
+    .cache()
 )
 
 print("\n" + "=" * 70)
 print("GOLD DIM TERRITORY")
 print("=" * 70)
 
-print(f"Rows: {result.count()}")
+# Reuse this count for key validation below.
+total_rows = result.count()
+
+print(f"Rows: {total_rows}")
 
 print("\nSchema:")
 result.printSchema()
@@ -82,9 +96,10 @@ result.printSchema()
 print("\nData:")
 result.show(truncate=False)
 
-# Territory Key Validation
 
-total_rows = result.count()
+# ============================================================
+# Territory Key Validation
+# ============================================================
 
 distinct_keys = (
     result
@@ -101,4 +116,10 @@ print(f"Total territories   : {total_rows}")
 print(f"Distinct territories: {distinct_keys}")
 print(f"Duplicate keys      : {total_rows - distinct_keys}")
 
+
+# ============================================================
+# Cleanup
+# ============================================================
+
+result.unpersist()
 spark.stop()

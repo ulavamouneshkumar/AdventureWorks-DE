@@ -53,8 +53,6 @@ fact_returns = (
     .load(str(GOLD_TABLES["fact_returns"]))
 )
 
-print(f"Fact Sales rows   : {fact_sales.count()}")
-print(f"Fact Returns rows : {fact_returns.count()}")
 
 
 # ============================================================
@@ -92,7 +90,6 @@ sales_summary = (
     )
 )
 
-print(f"Sales summary rows : {sales_summary.count()}")
 
 
 # ============================================================
@@ -115,7 +112,6 @@ returns_summary = (
     )
 )
 
-print(f"Returns summary rows : {returns_summary.count()}")
 
 
 # ============================================================
@@ -283,6 +279,7 @@ result = (
     spark.read
     .format("delta")
     .load(target_path)
+    .cache()
 )
 
 

@@ -1,5 +1,5 @@
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, round
+from pyspark.sql.functions import col, round, broadcast
 from delta import configure_spark_with_delta_pip
 from config import SILVER_TABLES, GOLD_TABLES
 
@@ -54,20 +54,17 @@ dim_product = (
     .load(dim_product_path)
 )
 
-
 dim_date = (
     spark.read
     .format("delta")
     .load(dim_date_path)
 )
 
-
 dim_customer = (
     spark.read
     .format("delta")
     .load(dim_customer_path)
 )
-
 
 dim_territory = (
     spark.read
@@ -83,10 +80,12 @@ dim_territory = (
 sales_with_product = (
     sales.alias("s")
     .join(
-        dim_product.select(
-            "product_key",
-            "product_price",
-            "product_cost"
+        broadcast(
+            dim_product.select(
+                "product_key",
+                "product_price",
+                "product_cost"
+            )
         ).alias("p"),
         col("s.product_key") == col("p.product_key"),
         "left"
@@ -101,9 +100,11 @@ sales_with_product = (
 sales_with_date = (
     sales_with_product
     .join(
-        dim_date.select(
-            "date",
-            "date_key"
+        broadcast(
+            dim_date.select(
+                "date",
+                "date_key"
+            )
         ).alias("d"),
         col("s.order_date") == col("d.date"),
         "left"
@@ -118,8 +119,10 @@ sales_with_date = (
 sales_with_customer = (
     sales_with_date
     .join(
-        dim_customer.select(
-            "customer_key"
+        broadcast(
+            dim_customer.select(
+                "customer_key"
+            )
         ).alias("c"),
         col("s.customer_key") == col("c.customer_key"),
         "left"
@@ -134,8 +137,10 @@ sales_with_customer = (
 sales_enriched = (
     sales_with_customer
     .join(
-        dim_territory.select(
-            "territory_key"
+        broadcast(
+            dim_territory.select(
+                "territory_key"
+            )
         ).alias("t"),
         col("s.territory_key") == col("t.territory_key"),
         "left"
@@ -217,7 +222,6 @@ fact_sales = (
 
 target_path = str(GOLD_TABLES["fact_sales"])
 
-
 (
     fact_sales
     .write
@@ -235,6 +239,7 @@ result = (
     spark.read
     .format("delta")
     .load(target_path)
+    .cache()
 )
 
 

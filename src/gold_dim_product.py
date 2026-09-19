@@ -1,5 +1,5 @@
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, trim
+from pyspark.sql.functions import col, trim, broadcast
 from delta import configure_spark_with_delta_pip
 from config import SILVER_TABLES, GOLD_TABLES
 
@@ -40,13 +40,11 @@ products = (
     .load(products_path)
 )
 
-
 subcategories = (
     spark.read
     .format("delta")
     .load(subcategories_path)
 )
-
 
 categories = (
     spark.read
@@ -62,7 +60,7 @@ categories = (
 product_with_subcategory = (
     products.alias("p")
     .join(
-        subcategories.alias("s"),
+        broadcast(subcategories).alias("s"),
         col("p.product_subcategory_key")
         == col("s.product_subcategory_key"),
         "left"
@@ -77,7 +75,7 @@ product_with_subcategory = (
 product_with_category = (
     product_with_subcategory
     .join(
-        categories.alias("c"),
+        broadcast(categories).alias("c"),
         col("s.product_category_key")
         == col("c.product_category_key"),
         "left"
@@ -159,6 +157,7 @@ result = (
     spark.read
     .format("delta")
     .load(target_path)
+    .cache()
 )
 
 
@@ -170,7 +169,9 @@ print("\n" + "=" * 70)
 print("GOLD DIM PRODUCT")
 print("=" * 70)
 
-print(f"Rows: {result.count()}")
+total_products = result.count()
+
+print(f"Rows: {total_products}")
 
 
 print("\nSchema:")
@@ -184,8 +185,6 @@ result.show(10, truncate=False)
 # ============================================================
 # 9. PRODUCT KEY VALIDATION
 # ============================================================
-
-total_products = result.count()
 
 distinct_products = (
     result

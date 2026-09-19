@@ -59,9 +59,6 @@ dim_product = (
     .load(str(GOLD_TABLES["dim_product"]))
 )
 
-print(f"Fact Sales rows    : {fact_sales.count()}")
-print(f"Fact Returns rows  : {fact_returns.count()}")
-print(f"Dim Product rows   : {dim_product.count()}")
 
 
 # ============================================================
@@ -95,10 +92,6 @@ sales_by_product = (
     )
 )
 
-print(
-    f"Products with sales : "
-    f"{sales_by_product.count()}"
-)
 
 
 # ============================================================
@@ -117,10 +110,6 @@ returns_by_product = (
     )
 )
 
-print(
-    f"Products with returns : "
-    f"{returns_by_product.count()}"
-)
 
 
 # ============================================================
@@ -324,6 +313,7 @@ result = (
     spark.read
     .format("delta")
     .load(target_path)
+    .cache()
 )
 
 

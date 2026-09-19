@@ -1,7 +1,6 @@
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import (
     col,
-    countDistinct,
     sum,
     coalesce,
     lit,
@@ -19,7 +18,7 @@ from config import GOLD_TABLES
 
 builder = (
     SparkSession.builder
-    .appName("AdventureWorksGoldCustomerPerformance")
+    .appName("AdventureWorksGoldProductPerformance")
     .master("local[*]")
     .config(
         "spark.sql.extensions",
@@ -54,121 +53,111 @@ fact_returns = (
     .load(str(GOLD_TABLES["fact_returns"]))
 )
 
-dim_customer = (
+dim_product = (
     spark.read
     .format("delta")
-    .load(str(GOLD_TABLES["dim_customer"]))
+    .load(str(GOLD_TABLES["dim_product"]))
 )
 
-print(f"Fact Sales rows     : {fact_sales.count()}")
-print(f"Fact Returns rows   : {fact_returns.count()}")
-print(f"Dim Customer rows   : {dim_customer.count()}")
+print(f"Fact Sales rows    : {fact_sales.count()}")
+print(f"Fact Returns rows  : {fact_returns.count()}")
+print(f"Dim Product rows   : {dim_product.count()}")
 
 
 # ============================================================
-# 3. AGGREGATE SALES BY CUSTOMER
+# 3. AGGREGATE SALES BY PRODUCT
 # ============================================================
 
 print("\n" + "=" * 70)
-print("AGGREGATING SALES BY CUSTOMER")
+print("AGGREGATING SALES BY PRODUCT")
 print("=" * 70)
 
-sales_by_customer = (
+sales_by_product = (
     fact_sales
-    .groupBy("customer_key")
+    .groupBy("product_key")
     .agg(
-        countDistinct("order_number").alias(
-            "total_orders"
-        ),
-
-        sum("order_quantity").alias(
-            "total_quantity"
-        ),
+        sum("order_quantity").alias("total_quantity"),
 
         round(
             sum("sales_amount"),
             2
-        ).alias(
-            "total_sales"
-        ),
+        ).alias("total_sales"),
 
         round(
             sum("cost_amount"),
             2
-        ).alias(
-            "total_cost"
-        ),
+        ).alias("total_cost"),
 
         round(
             sum("profit_amount"),
             2
-        ).alias(
-            "total_profit"
-        )
+        ).alias("total_profit")
     )
 )
 
 print(
-    f"Customers with sales : "
-    f"{sales_by_customer.count()}"
+    f"Products with sales : "
+    f"{sales_by_product.count()}"
 )
 
 
 # ============================================================
-# 4. AGGREGATE RETURNS BY CUSTOMER
+# 4. AGGREGATE RETURNS BY PRODUCT
+# ============================================================
+
+print("\n" + "=" * 70)
+print("AGGREGATING RETURNS BY PRODUCT")
+print("=" * 70)
+
+returns_by_product = (
+    fact_returns
+    .groupBy("product_key")
+    .agg(
+        sum("return_quantity").alias("return_quantity")
+    )
+)
+
+print(
+    f"Products with returns : "
+    f"{returns_by_product.count()}"
+)
+
+
+# ============================================================
+# 5. START FROM COMPLETE PRODUCT DIMENSION
 # ============================================================
 #
 # IMPORTANT:
-# fact_returns does not contain customer_key.
 #
-# Therefore, returns cannot be directly attributed to customers
-# using the current source data.
+# dim_product contains all 293 products.
 #
-# We will NOT incorrectly assign returns to customers.
+# Therefore, it must be the LEFT side of the joins.
+#
+# This ensures products with no sales still appear.
 #
 # ============================================================
 
 print("\n" + "=" * 70)
-print("CUSTOMER RETURN ANALYSIS")
+print("COMBINING PRODUCT + SALES + RETURNS")
 print("=" * 70)
 
-print(
-    "Customer-level returns cannot be calculated from the "
-    "current fact_returns table because it has no customer_key."
-)
-
-print(
-    "Return metrics will therefore be NULL for customer-level "
-    "analysis rather than being incorrectly attributed."
-)
-
-
-# ============================================================
-# 5. START FROM COMPLETE CUSTOMER DIMENSION
-# ============================================================
-
-print("\n" + "=" * 70)
-print("COMBINING CUSTOMER + SALES")
-print("=" * 70)
-
-customer_metrics = (
-    dim_customer
-    .select("customer_key")
+product_metrics = (
+    dim_product
+    .select("product_key")
     .distinct()
-    .alias("c")
+    .alias("p")
     .join(
-        sales_by_customer.alias("s"),
-        col("c.customer_key")
-        == col("s.customer_key"),
+        sales_by_product.alias("s"),
+        col("p.product_key") == col("s.product_key"),
+        "left"
+    )
+    .join(
+        returns_by_product.alias("r"),
+        col("p.product_key") == col("r.product_key"),
         "left"
     )
     .select(
-        col("c.customer_key"),
-
-        coalesce(
-            col("s.total_orders"),
-            lit(0)
-        ).alias("total_orders"),
+        col("p.product_key"),
 
         coalesce(
             col("s.total_quantity"),
@@ -188,17 +177,36 @@ customer_metrics = (
         coalesce(
             col("s.total_profit"),
             lit(0)
-        ).alias("total_profit")
+        ).alias("total_profit"),
+
+        coalesce(
+            col("r.return_quantity"),
+            lit(0)
+        ).alias("return_quantity")
     )
 )
 
 
 # ============================================================
-# 6. CALCULATE PROFIT MARGIN
+# 6. CALCULATE NET QUANTITY
 # ============================================================
 
-customer_metrics = (
-    customer_metrics
+product_metrics = (
+    product_metrics
+    .withColumn(
+        "net_quantity",
+        col("total_quantity")
+        - col("return_quantity")
+    )
+)
+
+
+# ============================================================
+# 7. CALCULATE PROFIT MARGIN
+# ============================================================
+
+product_metrics = (
+    product_metrics
     .withColumn(
         "profit_margin",
         when(
@@ -216,120 +224,92 @@ customer_metrics = (
 
 
 # ============================================================
-# 7. CUSTOMER SEGMENT
-# ============================================================
-#
-# Segment based on total sales:
-#
-# >= 100,000 -> High Value
-# >= 25,000  -> Medium Value
-# < 25,000   -> Low Value
-#
-# These thresholds are business rules for this project and
-# can be changed later.
-#
+# 8. CALCULATE RETURN RATE
 # ============================================================
 
-customer_metrics = (
-    customer_metrics
+product_metrics = (
+    product_metrics
     .withColumn(
-        "customer_segment",
+        "return_rate",
         when(
-            col("total_sales") >= 100000,
-            "High Value"
-        )
-        .when(
-            col("total_sales") >= 25000,
-            "Medium Value"
-        )
-        .otherwise(
-            "Low Value"
-        )
+            col("total_quantity") > 0,
+            round(
+                (
+                    col("return_quantity")
+                    / col("total_quantity")
+                ) * 100,
+                2
+            )
+        ).otherwise(None)
     )
 )
 
 
 # ============================================================
-# 8. JOIN CUSTOMER ATTRIBUTES
+# 9. JOIN PRODUCT ATTRIBUTES
 # ============================================================
 
 print("\n" + "=" * 70)
-print("ADDING CUSTOMER ATTRIBUTES")
+print("ADDING PRODUCT ATTRIBUTES")
 print("=" * 70)
 
-customer_performance = (
-    customer_metrics.alias("m")
+product_performance = (
+    product_metrics.alias("m")
     .join(
-        dim_customer.alias("c"),
-        col("m.customer_key")
-        == col("c.customer_key"),
+        dim_product.alias("p"),
+        col("m.product_key") == col("p.product_key"),
         "left"
     )
     .select(
-        col("m.customer_key"),
+        col("m.product_key"),
 
-        col("c.prefix"),
-        col("c.first_name"),
-        col("c.last_name"),
-        col("c.full_name"),
+        col("p.product_sku"),
+        col("p.product_name"),
+        col("p.model_name"),
 
-        col("c.birth_date"),
-        col("c.marital_status"),
-        col("c.gender"),
+        col("p.product_subcategory_key"),
+        col("p.subcategory_name"),
 
-        col("c.email_address"),
-        col("c.annual_income"),
-        col("c.total_children"),
+        col("p.product_category_key"),
+        col("p.category_name"),
 
-        col("c.education_level"),
-        col("c.occupation"),
-        col("c.home_owner"),
+        col("p.product_color"),
+        col("p.product_size"),
+        col("p.product_style"),
 
-        col("m.total_orders"),
+        col("p.product_cost"),
+        col("p.product_price"),
+
         col("m.total_quantity"),
-
         col("m.total_sales"),
         col("m.total_cost"),
         col("m.total_profit"),
 
+        col("m.return_quantity"),
+        col("m.net_quantity"),
+
         col("m.profit_margin"),
-
-        lit(None).cast("long").alias(
-            "return_quantity"
-        ),
-
-        lit(None).cast("long").alias(
-            "net_quantity"
-        ),
-
-        lit(None).cast("double").alias(
-            "return_rate"
-        ),
-
-        col("m.customer_segment")
+        col("m.return_rate")
     )
 )
 
 
 # ============================================================
-# 9. WRITE GOLD TABLE
+# 10. WRITE GOLD TABLE
 # ============================================================
 
-target_path = str(GOLD_TABLES["customer_performance"])
+target_path = str(GOLD_TABLES["product_performance"])
 
 print("\n" + "=" * 70)
-print("WRITING GOLD CUSTOMER PERFORMANCE")
+print("WRITING GOLD PRODUCT PERFORMANCE")
 print("=" * 70)
 
 (
-    customer_performance
+    product_performance
     .write
     .format("delta")
     .mode("overwrite")
-    .option(
-        "overwriteSchema",
-        "true"
-    )
+    .option("overwriteSchema", "true")
     .save(target_path)
 )
 
@@ -337,22 +317,23 @@ print(f"Target : {target_path}")
 
 
 # ============================================================
-# 10. READ BACK
+# 11. READ BACK
 # ============================================================
 
 result = (
     spark.read
     .format("delta")
     .load(target_path)
+    .cache()
 )
 
 
 # ============================================================
-# 11. DISPLAY RESULT
+# 12. DISPLAY RESULT
 # ============================================================
 
 print("\n" + "=" * 70)
-print("GOLD CUSTOMER PERFORMANCE")
+print("GOLD PRODUCT PERFORMANCE")
 print("=" * 70)
 
 total_rows = result.count()
@@ -360,10 +341,9 @@ total_rows = result.count()
 print(f"Rows: {total_rows}")
 
 print("\nSchema:")
-
 result.printSchema()
 
-print("\nTop Customers by Sales:")
+print("\nTop Products by Sales:")
 
 (
     result
@@ -378,150 +358,169 @@ print("\nTop Customers by Sales:")
 
 
 # ============================================================
-# 12. CUSTOMER KEY VALIDATION
+# 13. PRODUCT KEY VALIDATION
 # ============================================================
 
 print("\n" + "=" * 70)
-print("CUSTOMER KEY VALIDATION")
+print("PRODUCT KEY VALIDATION")
 print("=" * 70)
 
-distinct_customer_keys = (
+distinct_product_keys = (
     result
-    .select("customer_key")
+    .select("product_key")
     .distinct()
     .count()
 )
 
-null_customer_keys = (
+null_product_keys = (
     result
     .filter(
-        col("customer_key").isNull()
+        col("product_key").isNull()
     )
     .count()
 )
 
-print(
-    f"Total customers         : "
-    f"{total_rows}"
-)
+print(f"Total products         : {total_rows}")
+print(f"Distinct product keys  : {distinct_product_keys}")
+print(f"Null product keys      : {null_product_keys}")
 
 print(
-    f"Distinct customer keys  : "
-    f"{distinct_customer_keys}"
-)
-
-print(
-    f"Null customer keys      : "
-    f"{null_customer_keys}"
-)
-
-print(
-    f"Duplicate customer keys : "
-    f"{total_rows - distinct_customer_keys}"
+    f"Duplicate product keys : "
+    f"{total_rows - distinct_product_keys}"
 )
 
 
 # ============================================================
-# 13. CUSTOMER ATTRIBUTE VALIDATION
+# 14. PRODUCT DIMENSION VALIDATION
 # ============================================================
 
 print("\n" + "=" * 70)
-print("CUSTOMER ATTRIBUTE VALIDATION")
+print("PRODUCT DIMENSION VALIDATION")
 print("=" * 70)
 
-null_full_names = (
+null_product_names = (
     result
     .filter(
-        col("full_name").isNull()
+        col("product_name").isNull()
     )
     .count()
 )
 
-null_annual_income = (
+null_categories = (
     result
     .filter(
-        col("annual_income").isNull()
+        col("category_name").isNull()
+    )
+    .count()
+)
+
+null_subcategories = (
+    result
+    .filter(
+        col("subcategory_name").isNull()
     )
     .count()
 )
 
 print(
-    f"Null full names     : "
-    f"{null_full_names}"
+    f"Null product names : "
+    f"{null_product_names}"
 )
 
 print(
-    f"Null annual income  : "
-    f"{null_annual_income}"
+    f"Null categories    : "
+    f"{null_categories}"
+)
+
+print(
+    f"Null subcategories : "
+    f"{null_subcategories}"
 )
 
 
 # ============================================================
-# 14. CUSTOMERS WITHOUT SALES
+# 15. PRODUCTS WITHOUT SALES
 # ============================================================
 
 print("\n" + "=" * 70)
-print("CUSTOMERS WITHOUT SALES")
+print("PRODUCTS WITHOUT SALES")
 print("=" * 70)
 
-customers_without_sales = (
+products_without_sales = (
     result
     .filter(
-        col("total_orders") == 0
+        col("total_quantity") == 0
     )
     .count()
 )
 
 print(
-    f"Customers without sales : "
-    f"{customers_without_sales}"
+    f"Products without sales : "
+    f"{products_without_sales}"
 )
 
 
 # ============================================================
-# 15. CUSTOMER BUSINESS METRICS
+# 16. PRODUCTS WITHOUT RETURNS
 # ============================================================
 
 print("\n" + "=" * 70)
-print("CUSTOMER BUSINESS METRICS")
+print("PRODUCTS WITHOUT RETURNS")
+print("=" * 70)
+
+products_without_returns = (
+    result
+    .filter(
+        col("return_quantity") == 0
+    )
+    .count()
+)
+
+print(
+    f"Products without returns : "
+    f"{products_without_returns}"
+)
+
+
+# ============================================================
+# 17. BUSINESS METRICS
+# ============================================================
+
+print("\n" + "=" * 70)
+print("PRODUCT BUSINESS METRICS")
 print("=" * 70)
 
 result.selectExpr(
-    "sum(total_orders) as total_orders",
-
     "sum(total_quantity) as total_quantity",
 
     "round(sum(total_sales), 2) as total_sales",
 
     "round(sum(total_cost), 2) as total_cost",
 
-    "round(sum(total_profit), 2) as total_profit"
+    "round(sum(total_profit), 2) as total_profit",
+
+    "sum(return_quantity) as total_returns",
+
+    "sum(net_quantity) as total_net_quantity"
 ).show()
 
 
 # ============================================================
-# 16. CUSTOMER SEGMENT DISTRIBUTION
+# 18. CATEGORY PERFORMANCE
 # ============================================================
 
 print("\n" + "=" * 70)
-print("CUSTOMER SEGMENT DISTRIBUTION")
+print("CATEGORY PERFORMANCE")
 print("=" * 70)
 
 (
     result
     .groupBy(
-        "customer_segment"
+        "product_category_key",
+        "category_name"
     )
     .agg(
-        countDistinct(
-            "customer_key"
-        ).alias(
-            "customer_count"
-        ),
-
-        sum(
-            "total_quantity"
-        ).alias(
+        sum("total_quantity").alias(
             "total_quantity"
         ),
 
@@ -537,6 +536,14 @@ print("=" * 70)
             2
         ).alias(
             "total_profit"
+        ),
+
+        sum("return_quantity").alias(
+            "return_quantity"
+        ),
+
+        sum("net_quantity").alias(
+            "net_quantity"
         )
     )
     .orderBy(
@@ -549,11 +556,89 @@ print("=" * 70)
 
 
 # ============================================================
-# 17. TOP CUSTOMERS BY PROFIT
+# 19. SUBCATEGORY PERFORMANCE
 # ============================================================
 
 print("\n" + "=" * 70)
-print("TOP CUSTOMERS BY PROFIT")
+print("SUBCATEGORY PERFORMANCE")
+print("=" * 70)
+
+(
+    result
+    .groupBy(
+        "product_subcategory_key",
+        "subcategory_name"
+    )
+    .agg(
+        sum("total_quantity").alias(
+            "total_quantity"
+        ),
+
+        round(
+            sum("total_sales"),
+            2
+        ).alias(
+            "total_sales"
+        ),
+
+        round(
+            sum("total_profit"),
+            2
+        ).alias(
+            "total_profit"
+        ),
+
+        sum("return_quantity").alias(
+            "return_quantity"
+        )
+    )
+    .orderBy(
+        col("total_sales").desc()
+    )
+    .show(
+        20,
+        truncate=False
+    )
+)
+
+
+# ============================================================
+# 20. HIGH RETURN RATE PRODUCTS
+# ============================================================
+
+print("\n" + "=" * 70)
+print("HIGH RETURN RATE PRODUCTS")
+print("=" * 70)
+
+(
+    result
+    .filter(
+        col("total_quantity") > 0
+    )
+    .orderBy(
+        col("return_rate").desc()
+    )
+    .select(
+        "product_key",
+        "product_name",
+        "category_name",
+        "total_quantity",
+        "return_quantity",
+        "return_rate"
+    )
+    .show(
+        10,
+        truncate=False
+    )
+)
+
+
+# ============================================================
+# 21. TOP PRODUCTS BY PROFIT
+# ============================================================
+
+print("\n" + "=" * 70)
+print("TOP PRODUCTS BY PROFIT")
 print("=" * 70)
 
 (
@@ -562,14 +647,12 @@ print("=" * 70)
         col("total_profit").desc()
     )
     .select(
-        "customer_key",
-        "full_name",
-        "total_orders",
-        "total_quantity",
+        "product_key",
+        "product_name",
+        "category_name",
         "total_sales",
         "total_profit",
-        "profit_margin",
-        "customer_segment"
+        "profit_margin"
     )
     .show(
         10,
@@ -579,36 +662,7 @@ print("=" * 70)
 
 
 # ============================================================
-# 18. TOP CUSTOMERS BY ORDER COUNT
-# ============================================================
-
-print("\n" + "=" * 70)
-print("TOP CUSTOMERS BY ORDER COUNT")
-print("=" * 70)
-
-(
-    result
-    .orderBy(
-        col("total_orders").desc()
-    )
-    .select(
-        "customer_key",
-        "full_name",
-        "total_orders",
-        "total_quantity",
-        "total_sales",
-        "total_profit",
-        "customer_segment"
-    )
-    .show(
-        10,
-        truncate=False
-    )
-)
-
-
-# ============================================================
-# 19. SOURCE FACT RECONCILIATION
+# 22. SOURCE FACT RECONCILIATION
 # ============================================================
 
 print("\n" + "=" * 70)
@@ -629,6 +683,14 @@ source = (
     .collect()[0]
 )
 
+returns_source = (
+    fact_returns
+    .selectExpr(
+        "sum(return_quantity) as returns"
+    )
+    .collect()[0]
+)
+
 summary = (
     result
     .selectExpr(
@@ -638,7 +700,11 @@ summary = (
 
         "round(sum(total_cost), 2) as cost",
 
-        "round(sum(total_profit), 2) as profit"
+        "round(sum(total_profit), 2) as profit",
+
+        "sum(return_quantity) as returns",
+
+        "sum(net_quantity) as net_quantity"
     )
     .collect()[0]
 )
@@ -687,13 +753,25 @@ print(
 )
 
 
+print("\nReturns reconciliation:")
+
+print(
+    f"Returns - Source  : "
+    f"{returns_source['returns']}"
+)
+
+print(
+    f"Returns - Summary : "
+    f"{summary['returns']}"
+)
+
+
 # ============================================================
-# 20. RECONCILIATION STATUS
+# 23. RECONCILIATION STATUS
 # ============================================================
 
 sales_passed = (
-    source["quantity"]
-    == summary["quantity"]
+    source["quantity"] == summary["quantity"]
     and
     float(source["sales"])
     == float(summary["sales"])
@@ -705,67 +783,88 @@ sales_passed = (
     == float(summary["profit"])
 )
 
+returns_passed = (
+    returns_source["returns"]
+    == summary["returns"]
+)
+
 
 print("\n" + "=" * 70)
 print("RECONCILIATION STATUS")
 print("=" * 70)
 
 print(
-    f"Sales reconciliation : "
+    f"Sales reconciliation   : "
     f"{'PASSED' if sales_passed else 'FAILED'}"
 )
 
+print(
+    f"Returns reconciliation : "
+    f"{'PASSED' if returns_passed else 'FAILED'}"
+)
+
 
 # ============================================================
-# 21. FINAL VALIDATION
+# 24. FINAL VALIDATION
 # ============================================================
 
 print("\n" + "=" * 70)
-print("FINAL CUSTOMER PERFORMANCE VALIDATION")
+print("FINAL PRODUCT PERFORMANCE VALIDATION")
 print("=" * 70)
 
-expected_customers = 18148
+expected_products = 293
 
-customer_count_passed = (
-    total_rows == expected_customers
+product_count_passed = (
+    total_rows == expected_products
 )
 
 key_validation_passed = (
-    total_rows == distinct_customer_keys
+    total_rows == distinct_product_keys
     and
-    null_customer_keys == 0
+    null_product_keys == 0
 )
 
-attribute_validation_passed = (
-    null_full_names == 0
+dimension_validation_passed = (
+    null_product_names == 0
+    and
+    null_categories == 0
+    and
+    null_subcategories == 0
 )
+
 
 all_passed = (
-    customer_count_passed
+    product_count_passed
     and key_validation_passed
-    and attribute_validation_passed
+    and dimension_validation_passed
     and sales_passed
+    and returns_passed
 )
 
 
 print(
-    f"Customer count validation : "
-    f"{'PASSED' if customer_count_passed else 'FAILED'}"
+    f"Product count validation : "
+    f"{'PASSED' if product_count_passed else 'FAILED'}"
 )
 
 print(
-    f"Key validation            : "
+    f"Key validation           : "
     f"{'PASSED' if key_validation_passed else 'FAILED'}"
 )
 
 print(
-    f"Attribute validation      : "
-    f"{'PASSED' if attribute_validation_passed else 'FAILED'}"
+    f"Dimension validation     : "
+    f"{'PASSED' if dimension_validation_passed else 'FAILED'}"
 )
 
 print(
-    f"Sales reconciliation      : "
+    f"Sales reconciliation     : "
     f"{'PASSED' if sales_passed else 'FAILED'}"
+)
+
+print(
+    f"Returns reconciliation   : "
+    f"{'PASSED' if returns_passed else 'FAILED'}"
 )
 
 print(
@@ -775,7 +874,7 @@ print(
 
 
 # ============================================================
-# 22. STOP SPARK
+# 25. STOP SPARK
 # ============================================================
 
 spark.stop()

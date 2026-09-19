@@ -1,5 +1,5 @@
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col
+from pyspark.sql.functions import col, broadcast
 from delta import configure_spark_with_delta_pip
 from config import SILVER_TABLES, GOLD_TABLES
 
@@ -46,20 +46,17 @@ dim_date_path = str(GOLD_TABLES["dim_date"])
 dim_product_path = str(GOLD_TABLES["dim_product"])
 dim_territory_path = str(GOLD_TABLES["dim_territory"])
 
-
 dim_date = (
     spark.read
     .format("delta")
     .load(dim_date_path)
 )
 
-
 dim_product = (
     spark.read
     .format("delta")
     .load(dim_product_path)
 )
-
 
 dim_territory = (
     spark.read
@@ -75,9 +72,11 @@ dim_territory = (
 returns_with_date = (
     returns.alias("r")
     .join(
-        dim_date.select(
-            "date",
-            "date_key"
+        broadcast(
+            dim_date.select(
+                "date",
+                "date_key"
+            )
         ).alias("d"),
         col("r.return_date") == col("d.date"),
         "left"
@@ -92,8 +91,10 @@ returns_with_date = (
 returns_with_product = (
     returns_with_date
     .join(
-        dim_product.select(
-            "product_key"
+        broadcast(
+            dim_product.select(
+                "product_key"
+            )
         ).alias("p"),
         col("r.product_key") == col("p.product_key"),
         "left"
@@ -108,8 +109,10 @@ returns_with_product = (
 returns_enriched = (
     returns_with_product
     .join(
-        dim_territory.select(
-            "territory_key"
+        broadcast(
+            dim_territory.select(
+                "territory_key"
+            )
         ).alias("t"),
         col("r.territory_key") == col("t.territory_key"),
         "left"
@@ -138,7 +141,6 @@ fact_returns = (
 # ============================================================
 
 target_path = str(GOLD_TABLES["fact_returns"])
-
 
 (
     fact_returns
@@ -221,21 +223,18 @@ result.selectExpr(
         then 1 else 0 end
     ) as null_date_keys
     """,
-
     """
     sum(
         case when product_key is null
         then 1 else 0 end
     ) as null_product_keys
     """,
-
     """
     sum(
         case when territory_key is null
         then 1 else 0 end
     ) as null_territory_keys
     """,
-
     """
     sum(
         case when return_date is null
@@ -255,14 +254,12 @@ print("=" * 70)
 
 result.selectExpr(
     "sum(return_quantity) as total_return_quantity",
-
     """
     sum(
         case when return_quantity <= 0
         then 1 else 0 end
     ) as non_positive_returns
     """,
-
     """
     sum(
         case when return_quantity is null
@@ -297,9 +294,11 @@ print("=" * 70)
 (
     result
     .join(
-        dim_date.select(
-            "date_key",
-            "calendar_year"
+        broadcast(
+            dim_date.select(
+                "date_key",
+                "calendar_year"
+            )
         ),
         on="date_key",
         how="left"

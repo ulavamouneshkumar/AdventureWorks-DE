@@ -3,8 +3,10 @@ from pyspark.sql.functions import (
     col,
     sum,
     round,
-    when
+    when,
+    broadcast
 )
+
 
 from delta import configure_spark_with_delta_pip
 from config import GOLD_TABLES
@@ -51,8 +53,7 @@ dim_date = (
     .load(str(GOLD_TABLES["dim_date"]))
 )
 
-print(f"Sales Summary rows : {sales_summary.count()}")
-print(f"Dim Date rows      : {dim_date.count()}")
+print("Sales Summary and Date Dimension loaded successfully.")
 
 
 # ============================================================
@@ -66,7 +67,7 @@ print("=" * 70)
 sales_with_date = (
     sales_summary.alias("s")
     .join(
-        dim_date.alias("d"),
+        broadcast(dim_date).alias("d"),
         col("s.date_key") == col("d.date_key"),
         "inner"
     )
@@ -209,6 +210,7 @@ result = (
     spark.read
     .format("delta")
     .load(target_path)
+    .cache()
 )
 
 
@@ -220,7 +222,8 @@ print("\n" + "=" * 70)
 print("GOLD MONTHLY SALES SUMMARY")
 print("=" * 70)
 
-print(f"Rows: {result.count()}")
+total_rows = result.count()
+print(f"Rows: {total_rows}")
 
 print("\nSchema:")
 result.printSchema()
@@ -291,8 +294,6 @@ null_check.show()
 print("\n" + "=" * 70)
 print("MONTH GRAIN VALIDATION")
 print("=" * 70)
-
-total_rows = result.count()
 
 distinct_months = (
     result
